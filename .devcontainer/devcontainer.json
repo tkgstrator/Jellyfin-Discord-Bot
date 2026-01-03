@@ -1,0 +1,95 @@
+{
+  "name": "Jellyfin Discord Bot",
+  "dockerComposeFile": [
+    "compose.yaml"
+  ],
+  "service": "app",
+  "workspaceFolder": "/home/vscode/app",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode",
+  "mounts": [
+    "source=${env:HOME}/home/vscode/.ssh,target=/.ssh,type=bind,consistency=cached,readonly"
+  ],
+  "remoteEnv": {},
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "2.52.0"
+    },
+    "ghcr.io/devcontainers-extra/features/ffmpeg-apt-get:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "configureZshAsDefaultShell": true
+    },
+    "ghcr.io/shyim/devcontainers-features/bun:0": {},
+    "ghcr.io/devcontainers/features/node:1.5.0": {
+      "version": "22.21.1"
+    },
+    "ghcr.io/devcontainers-extra/features/fzf:1": {},
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "moby": false,
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+  "postAttachCommand": "/bin/sh .devcontainer/postAttachCommand.sh",
+  "postCreateCommand": "/bin/sh .devcontainer/postCreateCommand.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "EditorConfig.EditorConfig",
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "Intlayer.intlayer-vs-code-extension",
+        "Lokalise.i18n-ally",
+        "PKief.material-icon-theme",
+        "antfu.file-nesting",
+        "bierner.markdown-mermaid",
+        "bierner.markdown-preview-github-styles",
+        "biomejs.biome",
+        "bradlc.vscode-tailwindcss",
+        "eamodio.gitlens",
+        "jebbs.markdown-extended",
+        "ms-vscode.vscode-typescript-next",
+        "redhat.vscode-yaml",
+        "spmeesseman.vscode-taskexplorer",
+        "tamasfe.even-better-toml",
+        "vsls-contrib.gitdoc"
+      ],
+      "settings": {
+        "betterTypeScriptErrors.prettify": true,
+        "debug.internalConsoleOptions": "neverOpen",
+        "diffEditor.diffAlgorithm": "advanced",
+        "diffEditor.experimental.showMoves": true,
+        "diffEditor.renderSideBySide": false,
+        "editor.formatOnPaste": true,
+        "editor.guides.bracketPairs": "active",
+        "editor.codeActionsOnSave": {
+          "quickfix.biome": "explicit",
+          "source.organizeImports.biome": "explicit"
+        },
+        "editor.formatOnSave": true,
+        "files.watcherExclude": {
+          "**/node_modules/**": true
+        },
+        "scm.defaultViewMode": "tree",
+        "[javascript]": {
+          "editor.defaultFormatter": "biomejs.biome"
+        },
+        "[javascriptreact]": {
+          "editor.defaultFormatter": "biomejs.biome"
+        },
+        "[typescript]": {
+          "editor.defaultFormatter": "biomejs.biome"
+        },
+        "[typescriptreact]": {
+          "editor.defaultFormatter": "biomejs.biome"
+        },
+        "[json]": {
+          "editor.defaultFormatter": "biomejs.biome"
+        },
+        "[jsonc]": {
+          "editor.defaultFormatter": "biomejs.biome"
+        }
+      }
+    }
+  }
+}
