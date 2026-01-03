@@ -20,8 +20,13 @@ import {
   type VoiceConnection,
   type AudioPlayer,
 } from '@discordjs/voice';
+import dayjs from 'dayjs';
+import duration from 'dayjs/plugin/duration.js';
 import { JellyfinClient, type MusicItem } from './jellyfin.js';
 import { logger } from './logger.js';
+
+// dayjsプラグインを有効化
+dayjs.extend(duration);
 
 export class MusicBot {
   private client: Client;
@@ -47,6 +52,17 @@ export class MusicBot {
 
     this.setupEventHandlers();
     this.client.login(token);
+  }
+
+  /**
+   * 秒数を MM:SS または HH:MM:SS 形式にフォーマット
+   */
+  private formatDuration(seconds: number): string {
+    const d = dayjs.duration(seconds, 'seconds');
+    if (d.hours() > 0) {
+      return d.format('H:mm:ss');
+    }
+    return d.format('m:ss');
   }
 
   private setupEventHandlers() {
@@ -170,7 +186,7 @@ export class MusicBot {
 
   private async handleLeave(interaction: ChatInputCommandInteraction) {
     const connection = this.connections.get(interaction.guildId!);
-    
+
     if (!connection) {
       await interaction.reply({
         content: 'ボイスチャンネルに参加していません。',
@@ -193,7 +209,7 @@ export class MusicBot {
 
     try {
       const playlists = await this.jellyfinClient.getPlaylists();
-      
+
       if (playlists.length === 0) {
         await interaction.editReply('プレイリストが見つかりませんでした。');
         return;
@@ -221,7 +237,7 @@ export class MusicBot {
 
     try {
       const playlists = await this.jellyfinClient.getPlaylists();
-      
+
       if (playlists.length === 0) {
         await interaction.editReply('プレイリストが見つかりませんでした。');
         return;
@@ -322,12 +338,21 @@ export class MusicBot {
           )
           .setColor(isVideo ? 0x9b59b6 : 0x00ae86)
           .setTimestamp();
-        
+
+        // 再生時間を追加
+        if (song.durationSeconds) {
+          embed.addFields({
+            name: 'Duration',
+            value: this.formatDuration(song.durationSeconds),
+            inline: true,
+          });
+        }
+
         // アルバムアートを設定
         if (song.imageUrl) {
           embed.setThumbnail(song.imageUrl);
         }
-        
+
         await textChannel.send({ embeds: [embed] });
       }
 
@@ -364,7 +389,7 @@ export class MusicBot {
 
   private async handleSkip(interaction: ChatInputCommandInteraction) {
     const player = this.players.get(interaction.guildId!);
-    
+
     if (!player) {
       await interaction.reply({
         content: '再生中の曲がありません。',
@@ -379,7 +404,7 @@ export class MusicBot {
 
   private async handleStop(interaction: ChatInputCommandInteraction) {
     const player = this.players.get(interaction.guildId!);
-    
+
     if (!player) {
       await interaction.reply({
         content: '再生中の曲がありません。',
@@ -395,7 +420,7 @@ export class MusicBot {
 
   private async handleNowPlaying(interaction: ChatInputCommandInteraction) {
     const song = this.currentSongs.get(interaction.guildId!);
-    
+
     if (!song) {
       await interaction.reply({
         content: '現在再生中の曲がありません。',
@@ -414,6 +439,15 @@ export class MusicBot {
       )
       .setColor(isVideo ? 0x9b59b6 : 0x00ae86)
       .setTimestamp();
+
+    // 再生時間を追加
+    if (song.durationSeconds) {
+      embed.addFields({
+        name: 'Duration',
+        value: this.formatDuration(song.durationSeconds),
+        inline: true,
+      });
+    }
 
     // アルバムアートを設定
     if (song.imageUrl) {
