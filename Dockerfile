@@ -1,4 +1,4 @@
-# ビルドステージ
+# ビルドステージ（Bunでビルド）
 FROM oven/bun:latest AS build
 WORKDIR /app
 
@@ -7,20 +7,23 @@ RUN --mount=type=bind,source=package.json,target=/app/package.json,readonly \
   --mount=type=bind,source=bun.lock,target=/app/bun.lock,readonly \
   bun install --frozen-lockfile --ignore-scripts
 
+# TypeScriptのビルド
 RUN --mount=type=bind,source=tsconfig.json,target=/app/tsconfig.json,readonly \
   --mount=type=bind,source=package.json,target=/app/package.json,readonly \
   --mount=type=bind,source=src,target=/app/src,readonly \
   bun run build
 
+# 本番依存関係のインストールステージ
 FROM oven/bun:latest AS package
 WORKDIR /app
 
+# Bunで本番依存関係のみインストール
 RUN --mount=type=bind,source=package.json,target=/app/package.json,readonly \
   --mount=type=bind,source=bun.lock,target=/app/bun.lock,readonly \
   bun install --frozen-lockfile --ignore-scripts --omit=dev
 
-# 本番用ステージ
-FROM oven/bun:latest
+# 本番用ステージ（Node.jsで実行）
+FROM node:lts-slim
 WORKDIR /app
 
 RUN \
@@ -35,4 +38,4 @@ COPY --from=build /app/dist ./dist
 
 ENV NODE_ENV=production
 
-CMD ["bun", "run", "dist/index.js"]
+CMD ["node", "dist/index.js"]
