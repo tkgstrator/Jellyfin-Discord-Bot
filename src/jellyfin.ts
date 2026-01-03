@@ -172,14 +172,11 @@ export class JellyfinClient {
 
   /**
    * ストリーミングURLを生成
+   * トランスコードなしで元ファイルを直接ストリーミング
    */
-  private getStreamUrl(itemId: string, mediaType: MediaType): string {
-    if (mediaType === 'video') {
-      // 動画の場合は音声のみを抽出してストリーミング
-      return `${this.config.serverUrl}/Audio/${itemId}/universal?UserId=${this.config.userId}&DeviceId=discord-bot-1&api_key=${this.config.apiKey}&Container=opus,mp3,aac,m4a,flac,wav&TranscodingContainer=mp3&TranscodingProtocol=http&AudioCodec=mp3&MaxStreamingBitrate=128000`;
-    }
-    // 音楽の場合
-    return `${this.config.serverUrl}/Audio/${itemId}/universal?UserId=${this.config.userId}&DeviceId=discord-bot-1&api_key=${this.config.apiKey}&Container=opus,mp3,aac,m4a,flac,wav&TranscodingContainer=mp3&TranscodingProtocol=http&AudioCodec=mp3&MaxStreamingBitrate=128000`;
+  private getStreamUrl(itemId: string, _mediaType: MediaType): string {
+    // static=trueで元ファイルをそのまま配信（トランスコードなし）
+    return `${this.config.serverUrl}/Audio/${itemId}/stream?static=true&api_key=${this.config.apiKey}`;
   }
 
   /**

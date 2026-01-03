@@ -17,6 +17,8 @@ import {
   createAudioResource,
   AudioPlayerStatus,
   VoiceConnectionStatus,
+  NoSubscriberBehavior,
+  entersState,
   type VoiceConnection,
   type AudioPlayer,
 } from '@discordjs/voice';
@@ -89,10 +91,6 @@ export class MusicBot {
   private async registerCommands() {
     const commands = [
       {
-        name: 'join',
-        description: 'ボイスチャンネルに参加します',
-      },
-      {
         name: 'leave',
         description: 'ボイスチャンネルから退出します',
       },
@@ -131,9 +129,6 @@ export class MusicBot {
 
     try {
       switch (commandName) {
-        case 'join':
-          await this.handleJoin(interaction);
-          break;
         case 'leave':
           await this.handleLeave(interaction);
           break;
@@ -162,26 +157,70 @@ export class MusicBot {
     }
   }
 
-  private async handleJoin(interaction: ChatInputCommandInteraction) {
-    const member = interaction.member as any;
-    const voiceChannel = member?.voice?.channel;
-
-    if (!voiceChannel) {
-      await interaction.reply({
-        content: 'ボイスチャンネルに参加してからコマンドを実行してください。',
-        ephemeral: true,
-      });
-      return;
+  /**
+   * ボイスチャンネルに接続（既存の接続があれば再利用）
+   */
+  private async ensureVoiceConnection(
+    guildId: string,
+    channelId: string,
+    adapterCreator: any
+  ): Promise<VoiceConnection | null> {
+    // 既存の接続があれば再利用
+    const existing = this.connections.get(guildId);
+    if (existing && existing.state.status !== VoiceConnectionStatus.Destroyed) {
+      return existing;
     }
 
     const connection = joinVoiceChannel({
-      channelId: voiceChannel.id,
-      guildId: interaction.guildId!,
-      adapterCreator: interaction.guild!.voiceAdapterCreator as any,
+      channelId,
+      guildId,
+      adapterCreator,
     });
 
-    this.connections.set(interaction.guildId!, connection);
-    await interaction.reply(`${voiceChannel.name} に参加しました`);
+    // 接続状態の監視と再接続ロジック
+    connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      try {
+        // 5秒以内に再接続を試みる
+        await Promise.race([
+          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+        ]);
+        logger.info('Voice connection reconnecting...');
+      } catch {
+        // 再接続失敗時は接続を破棄
+        logger.warn('Voice connection disconnected, destroying...');
+        connection.destroy();
+        this.cleanup(guildId);
+      }
+    });
+
+    connection.on(VoiceConnectionStatus.Destroyed, () => {
+      logger.info('Voice connection destroyed');
+      this.cleanup(guildId);
+    });
+
+    // Ready状態になるまで待機
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+    } catch {
+      connection.destroy();
+      return null;
+    }
+
+    this.connections.set(guildId, connection);
+    return connection;
+  }
+
+  /**
+   * クリーンアップ処理
+   */
+  private cleanup(guildId: string) {
+    this.connections.delete(guildId);
+    this.players.delete(guildId);
+    this.currentPlaylists.delete(guildId);
+    this.queues.delete(guildId);
+    this.currentSongs.delete(guildId);
+    this.textChannels.delete(guildId);
   }
 
   private async handleLeave(interaction: ChatInputCommandInteraction) {
@@ -196,10 +235,7 @@ export class MusicBot {
     }
 
     connection.destroy();
-    this.connections.delete(interaction.guildId!);
-    this.players.delete(interaction.guildId!);
-    this.currentPlaylists.delete(interaction.guildId!);
-    this.queues.delete(interaction.guildId!);
+    this.cleanup(interaction.guildId!);
 
     await interaction.reply('ボイスチャンネルから退出しました');
   }
@@ -227,13 +263,18 @@ export class MusicBot {
   }
 
   private async handlePlay(interaction: ChatInputCommandInteraction) {
-    await interaction.deferReply();
+    const member = interaction.member as any;
+    const voiceChannel = member?.voice?.channel;
 
-    const connection = this.connections.get(interaction.guildId!);
-    if (!connection) {
-      await interaction.editReply('先に `/join` でボイスチャンネルに参加してください。');
+    if (!voiceChannel) {
+      await interaction.reply({
+        content: 'ボイスチャンネルに参加してからコマンドを実行してください。',
+        ephemeral: true,
+      });
       return;
     }
+
+    await interaction.deferReply();
 
     try {
       const playlists = await this.jellyfinClient.getPlaylists();
@@ -272,15 +313,31 @@ export class MusicBot {
 
     const playlistId = interaction.values[0];
     const guildId = interaction.guildId;
+    const member = interaction.member as any;
+    const voiceChannel = member?.voice?.channel;
 
     if (!guildId || !playlistId) {
       return;
     }
 
-    const connection = this.connections.get(guildId);
+    if (!voiceChannel) {
+      await interaction.followUp({
+        content: 'ボイスチャンネルに参加してからコマンドを実行してください。',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // ボイスチャンネルに自動接続
+    const connection = await this.ensureVoiceConnection(
+      guildId,
+      voiceChannel.id,
+      interaction.guild!.voiceAdapterCreator
+    );
+
     if (!connection) {
       await interaction.followUp({
-        content: 'ボイスチャンネルに接続されていません。',
+        content: 'ボイスチャンネルへの接続に失敗しました。',
         ephemeral: true,
       });
       return;
@@ -322,7 +379,28 @@ export class MusicBot {
         return;
       }
 
-      logger.info(`Playing: ${song.name} by ${song.artist}`);
+      // 楽曲情報をコンソールに出力
+      const trackInfo = song.indexNumber
+        ? song.discNumber
+          ? `Disc ${song.discNumber} - Track ${song.indexNumber}`
+          : `Track ${song.indexNumber}`
+        : null;
+
+      logger.info('Now playing:', {
+        title: song.name,
+        artist: song.artist,
+        album: song.album,
+        albumArtist: song.albumArtist,
+        duration: song.durationSeconds ? this.formatDuration(song.durationSeconds) : 'Unknown',
+        track: trackInfo,
+        year: song.year,
+        genres: song.genres.length > 0 ? song.genres : null,
+        container: song.container,
+        bitrate: song.bitrate ? `${Math.round(song.bitrate / 1000)} kbps` : null,
+        sampleRate: song.sampleRate ? `${song.sampleRate} Hz` : null,
+        channels: song.channels,
+      });
+
       this.currentSongs.set(guildId, song);
 
       // Embedで楽曲情報を表示
@@ -330,9 +408,8 @@ export class MusicBot {
       if (textChannel) {
         const isVideo = song.mediaType === 'video';
         const embed = new EmbedBuilder()
-          .setTitle(isVideo ? 'Now Playing (Video)' : 'Now Playing')
+          .setTitle(song.name)
           .addFields(
-            { name: 'Title', value: song.name, inline: true },
             { name: 'Artist', value: song.artist, inline: true },
             { name: 'Album', value: song.album, inline: true },
           )
@@ -344,6 +421,33 @@ export class MusicBot {
           embed.addFields({
             name: 'Duration',
             value: this.formatDuration(song.durationSeconds),
+            inline: true,
+          });
+        }
+
+        // ディスク番号を追加
+        if (song.discNumber) {
+          embed.addFields({
+            name: 'Disc',
+            value: song.discNumber.toString(),
+            inline: true,
+          });
+        }
+
+        // トラック番号を追加
+        if (song.indexNumber) {
+          embed.addFields({
+            name: 'Track',
+            value: song.indexNumber.toString(),
+            inline: true,
+          });
+        }
+
+        // 発売年を追加
+        if (song.year) {
+          embed.addFields({
+            name: 'Year',
+            value: song.year.toString(),
             inline: true,
           });
         }
@@ -365,13 +469,35 @@ export class MusicBot {
 
       let player = this.players.get(guildId);
       if (!player) {
-        player = createAudioPlayer();
+        player = createAudioPlayer({
+          behaviors: {
+            // サブスクライバーがいない場合は停止
+            noSubscriber: NoSubscriberBehavior.Stop,
+          },
+        });
         this.players.set(guildId, player);
         connection.subscribe(player);
 
         player.on(AudioPlayerStatus.Idle, () => {
           logger.debug('Song ended, playing next...');
           setTimeout(() => this.playNextSong(guildId), 1000);
+        });
+
+        // サブスクライバーがいなくなった場合（VCから全員退出）は退出
+        player.on('stateChange', (oldState, newState) => {
+          if (
+            oldState.status !== AudioPlayerStatus.Idle &&
+            newState.status === AudioPlayerStatus.Idle &&
+            !this.currentPlaylists.has(guildId)
+          ) {
+            // 再生リストがない場合は接続を切断
+            const conn = this.connections.get(guildId);
+            if (conn) {
+              logger.info('No subscribers, leaving voice channel');
+              conn.destroy();
+              this.cleanup(guildId);
+            }
+          }
         });
 
         player.on('error', error => {
@@ -431,9 +557,8 @@ export class MusicBot {
 
     const isVideo = song.mediaType === 'video';
     const embed = new EmbedBuilder()
-      .setTitle(isVideo ? 'Now Playing (Video)' : 'Now Playing')
+      .setTitle(song.name)
       .addFields(
-        { name: 'Title', value: song.name, inline: true },
         { name: 'Artist', value: song.artist, inline: true },
         { name: 'Album', value: song.album, inline: true },
       )
@@ -445,6 +570,33 @@ export class MusicBot {
       embed.addFields({
         name: 'Duration',
         value: this.formatDuration(song.durationSeconds),
+        inline: true,
+      });
+    }
+
+    // ディスク番号を追加
+    if (song.discNumber) {
+      embed.addFields({
+        name: 'Disc',
+        value: song.discNumber.toString(),
+        inline: true,
+      });
+    }
+
+    // トラック番号を追加
+    if (song.indexNumber) {
+      embed.addFields({
+        name: 'Track',
+        value: song.indexNumber.toString(),
+        inline: true,
+      });
+    }
+
+    // 発売年を追加
+    if (song.year) {
+      embed.addFields({
+        name: 'Year',
+        value: song.year.toString(),
         inline: true,
       });
     }
