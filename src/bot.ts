@@ -6,6 +6,7 @@ import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
+  MessageFlags,
   type Interaction,
   type ChatInputCommandInteraction,
   type TextChannel,
@@ -19,13 +20,88 @@ import {
   VoiceConnectionStatus,
   NoSubscriberBehavior,
   entersState,
+  StreamType,
   type VoiceConnection,
   type AudioPlayer,
 } from '@discordjs/voice';
+import { PassThrough, Readable } from 'node:stream';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration.js';
 import { JellyfinClient, type MusicItem } from './jellyfin.js';
 import { logger } from './logger.js';
+
+// バッファサイズ（2MB - ロスレスAAC向け、高速ネットワーク環境）
+const BUFFER_SIZE = 2 * 1024 * 1024;
+
+/**
+ * バイト数を人間が読みやすい形式にフォーマット
+ */
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+};
+
+/**
+ * 指定サイズまでバッファリングしてからストリームを返す
+ */
+const createBufferedStream = async (url: string): Promise<Readable> => {
+  const response = await fetch(url);
+  if (!response.ok || !response.body) {
+    throw new Error(`Failed to fetch stream: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const buffer: Uint8Array[] = [];
+  let bufferedSize = 0;
+
+  const startTime = dayjs();
+  logger.info(`Buffering started (target: ${formatBytes(BUFFER_SIZE)})`);
+
+  // 初期バッファを確保（awaitでブロック）
+  while (bufferedSize < BUFFER_SIZE) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      buffer.push(value);
+      bufferedSize += value.length;
+      const percent = Math.min(100, (bufferedSize / BUFFER_SIZE) * 100).toFixed(1);
+      // キャリッジリターンで同じ行を上書き
+      process.stdout.write(`\rBuffering: ${formatBytes(bufferedSize)} / ${formatBytes(BUFFER_SIZE)} (${percent}%)`);
+    }
+  }
+
+  const elapsed = dayjs().diff(startTime, 'millisecond');
+  // 改行してからログ出力
+  process.stdout.write('\n');
+  logger.info(`Buffering complete: ${formatBytes(bufferedSize)} in ${elapsed}ms`);
+
+  // バッファ済みデータと残りのストリームを結合したReadableを作成
+  const readable = new Readable({
+    highWaterMark: BUFFER_SIZE,
+    async read() {
+      // まずバッファ済みデータを返す
+      while (buffer.length > 0) {
+        const chunk = buffer.shift();
+        if (!this.push(chunk)) return; // バックプレッシャー対応
+      }
+
+      // 残りのストリームを読み込み
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          this.push(null); // ストリーム終了
+        } else {
+          this.push(value);
+        }
+      } catch (error) {
+        this.destroy(error as Error);
+      }
+    },
+  });
+
+  return readable;
+};
 
 // dayjsプラグインを有効化
 dayjs.extend(duration);
@@ -150,10 +226,19 @@ export class MusicBot {
       }
     } catch (error) {
       logger.error(`Error handling command ${commandName}:`, error);
-      await interaction.reply({
-        content: 'エラーが発生しました。',
-        ephemeral: true,
-      });
+      // 既に応答済みの場合はエラーを無視
+      try {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply('エラーが発生しました。');
+        } else {
+          await interaction.reply({
+            content: 'エラーが発生しました。',
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+      } catch {
+        // インタラクションが無効な場合は無視
+      }
     }
   }
 
@@ -229,7 +314,7 @@ export class MusicBot {
     if (!connection) {
       await interaction.reply({
         content: 'ボイスチャンネルに参加していません。',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -269,7 +354,7 @@ export class MusicBot {
     if (!voiceChannel) {
       await interaction.reply({
         content: 'ボイスチャンネルに参加してからコマンドを実行してください。',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -323,7 +408,7 @@ export class MusicBot {
     if (!voiceChannel) {
       await interaction.followUp({
         content: 'ボイスチャンネルに参加してからコマンドを実行してください。',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -338,7 +423,7 @@ export class MusicBot {
     if (!connection) {
       await interaction.followUp({
         content: 'ボイスチャンネルへの接続に失敗しました。',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -360,7 +445,7 @@ export class MusicBot {
       logger.error('Error starting playback:', error);
       await interaction.followUp({
         content: '再生の開始に失敗しました。',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }
@@ -460,7 +545,12 @@ export class MusicBot {
         await textChannel.send({ embeds: [embed] });
       }
 
-      const resource = createAudioResource(song.streamUrl, {
+      // ストリームをバッファリングしてから再生開始
+      const bufferedStream = await createBufferedStream(song.streamUrl);
+
+      // createAudioResourceに直接ストリームを渡す（内部でFFmpegが処理）
+      const resource = createAudioResource(bufferedStream, {
+        inputType: StreamType.Arbitrary,
         inlineVolume: true,
       });
 
@@ -519,7 +609,7 @@ export class MusicBot {
     if (!player) {
       await interaction.reply({
         content: '再生中の曲がありません。',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -534,7 +624,7 @@ export class MusicBot {
     if (!player) {
       await interaction.reply({
         content: '再生中の曲がありません。',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -550,7 +640,7 @@ export class MusicBot {
     if (!song) {
       await interaction.reply({
         content: '現在再生中の曲がありません。',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
