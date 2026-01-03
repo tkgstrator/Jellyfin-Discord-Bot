@@ -9,13 +9,15 @@
   },
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun run tsc --noEmit && bun build src/index.ts --outdir=dist --target=node --external @discordjs/opus --external sodium-native --external prism-media --external ffmpeg-static",
+    "build": "bun run tsc --noEmit && bun build src/index.ts --outdir=dist --target=node --external @discordjs/opus --external sodium-native --external prism-media --external ffmpeg-static --external @snazzah/davey",
     "start": "bun run dist/index.js"
   },
   "dependencies": {
+    "@discord-player/opus": "^7.1.0",
     "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.19.0",
     "@jellyfin/sdk": "^0.13.0",
+    "@snazzah/davey": "^0.1.9",
     "consola": "^3.4.2",
     "dayjs": "^1.11.19",
     "discord.js": "^14.25.1",
