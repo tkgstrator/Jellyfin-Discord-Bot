@@ -24,7 +24,7 @@ export class JellyfinClient {
 
   constructor(config: JellyfinConfig) {
     this.config = JellyfinConfigSchema.parse(config);
-    
+
     // Jellyfinクライアントを初期化
     this.jellyfin = new Jellyfin({
       clientInfo: {
@@ -39,7 +39,7 @@ export class JellyfinClient {
 
     // APIインスタンスを作成
     this.api = this.jellyfin.createApi(this.config.serverUrl);
-    
+
     // APIキーで認証を設定
     this.api.accessToken = this.config.apiKey;
   }
@@ -88,7 +88,16 @@ export class JellyfinClient {
       const items = response.data.Items || [];
       return items.map((item) => {
         const mediaType = this.getMediaType(item as BaseItemDto);
+        // RunTimeTicksは100ナノ秒単位なので秒に変換
+        const durationSeconds = item.RunTimeTicks
+          ? Math.floor(item.RunTimeTicks / 10_000_000)
+          : null;
+
+        // MediaStreamsから技術情報を取得
+        const audioStream = item.MediaStreams?.find((s) => s.Type === 'Audio');
+
         return MediaItemSchema.parse({
+          // 基本情報
           id: item.Id,
           name: item.Name || 'Unknown',
           artist: item.AlbumArtist || item.Artists?.[0] || 'Unknown Artist',
@@ -96,6 +105,35 @@ export class JellyfinClient {
           streamUrl: this.getStreamUrl(item.Id as string, mediaType),
           imageUrl: this.getImageUrl(item as BaseItemDto),
           mediaType,
+
+          // 再生情報
+          durationSeconds,
+
+          // トラック情報
+          indexNumber: item.IndexNumber ?? null,
+          discNumber: item.ParentIndexNumber ?? null,
+
+          // アーティスト情報
+          albumArtist: item.AlbumArtist ?? null,
+          artists: item.Artists ?? [],
+          composers: [], // Jellyfinではアイテムレベルでは取得不可
+          genres: item.Genres ?? [],
+
+          // メタデータ
+          year: item.ProductionYear ?? null,
+          premiereDate: item.PremiereDate ?? null,
+          communityRating: item.CommunityRating ?? null,
+          officialRating: item.OfficialRating ?? null,
+
+          // 技術情報
+          container: item.Container ?? null,
+          bitrate: audioStream?.BitRate ?? null,
+          sampleRate: audioStream?.SampleRate ?? null,
+          channels: audioStream?.Channels ?? null,
+
+          // 追加情報
+          overview: item.Overview ?? null,
+          sortName: item.SortName ?? null,
         });
       });
     } catch (error) {

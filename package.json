@@ -17,6 +17,7 @@
     "@discordjs/voice": "^0.19.0",
     "@jellyfin/sdk": "^0.13.0",
     "consola": "^3.4.2",
+    "dayjs": "^1.11.19",
     "discord.js": "^14.25.1",
     "opusscript": "^0.1.1",
     "sodium-native": "^5.0.10",
