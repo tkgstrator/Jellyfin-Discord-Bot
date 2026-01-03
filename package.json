@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun run tsc --noEmit && bun build src/index.ts --outdir=dist --target=bun --external @discordjs/opus --external sodium-native --external prism-media --external ffmpeg-static",
+    "build": "bun run tsc --noEmit && bun build src/index.ts --outdir=dist --target=node --external @discordjs/opus --external sodium-native --external prism-media --external ffmpeg-static",
     "start": "bun run dist/index.js"
   },
   "dependencies": {
