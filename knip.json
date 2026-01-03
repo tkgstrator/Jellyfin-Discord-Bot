@@ -1,0 +1,41 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/app/main.tsx"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx,js,jsx,css,scss}",
+    "!src/**/*.d.ts"
+  ],
+  "ignore": [
+    "src/app/routeTree.gen.ts",
+    "src/components/ui/*.tsx",
+    "src/locales/*.{ts,tsx}",
+    "**/*.test.{ts,tsx}",
+    "**/*.spec.{ts,tsx}",
+    "__tests__/**"
+  ],
+  "ignoreDependencies": [
+    "@biomejs/biome",
+    "tailwindcss",
+    "tailwindcss-safe-area",
+    "tw-animate-css"
+  ],
+  "ignoreBinaries": [],
+  "rules": {
+    "files": "error",
+    "dependencies": "error",
+    "devDependencies": "error",
+    "unlisted": "error",
+    "exports": "error",
+    "nsExports": "error",
+    "classMembers": "error",
+    "types": "error",
+    "nsTypes": "error",
+    "enumMembers": "error",
+    "duplicates": "error"
+  },
+  "vite": {
+    "config": ["vite.config.ts"]
+  }
+}

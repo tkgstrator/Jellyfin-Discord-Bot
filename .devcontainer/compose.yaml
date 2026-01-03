@@ -1,0 +1,34 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ../:/home/vscode/app:cached
+      - node_modules:/home/vscode/app/node_modules:cached
+    depends_on:
+      redis:
+        condition: service_healthy
+    stdin_open: true
+    tty: true
+
+  redis:
+    image: redis:8.4.0
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+volumes:
+  node_modules:
+    external: false
+    driver: local
+    name: node_modules
+  redis-data:
+    external: false
+    driver: local
+    name: redis-data

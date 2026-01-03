@@ -1,0 +1,66 @@
+[config]
+fallback_models = ["gpt-5.1-2025-11-13"]
+model = "gpt-5.1-codex"
+reasoning_effort = "high"
+response_language = "ja-JP"
+git_provider = "gitlab"
+
+[gitlab]
+handle_push_trigger = true
+url = "https://gitlab.heroz.co.jp"
+
+[litellm]
+drop_params = true
+enable_reasoning_effort = false
+
+[pr_code_suggestions]
+demand_code_suggestions_self_review = true
+extra_instructions = "Please use Japanese in descriptions."
+max_context_tokens = 16000
+num_code_suggestions = 4
+suggestions_depth = 'exhaustive'
+
+[pr_description]
+inline_file_summary = true９
+add_original_user_description = false
+auto_describe = true
+auto_improve = true
+auto_review = true
+collapsible_file_list = false
+custom_labels = [
+  "Bug fix",
+  "Documentation",
+  "Enhancement",
+  "Feature",
+  "Hot fix",
+  "Other",
+  "Tests",
+]
+enable_help_text = true
+enable_pr_diagram = true
+enable_pr_type = true
+enable_semantic_files_types = true
+extra_instructions = """
+Please use Japanese in descriptions.
+Generate comprehensive and detailed descriptions including:
+- Overview of changes
+- Motivation and context
+- Implementation details
+- Testing approach
+- Related issues or dependencies
+"""
+final_update_message = true
+generate_ai_title = true
+include_generated_by_header = true
+publish_ai_title = true
+publish_description_as_comment = false
+publish_labels = true
+use_description_markers = true
+use_bullet_points = true
+
+[pr_reviewer]
+extra_instructions = "Please use Japanese in descriptions."
+inline_code_comments = true
+num_code_suggestions = 4
+require_score_review = true
+require_tests_review = true
