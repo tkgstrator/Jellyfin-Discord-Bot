@@ -6,11 +6,15 @@ import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   MessageFlags,
+  AttachmentBuilder,
   type Interaction,
   type ChatInputCommandInteraction,
   type TextChannel,
   type StringSelectMenuInteraction,
+  type ButtonInteraction,
 } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -30,8 +34,8 @@ import duration from 'dayjs/plugin/duration.js';
 import { JellyfinClient, type MusicItem } from './jellyfin.js';
 import { logger } from './logger.js';
 
-// バッファサイズ（2MB - ロスレスAAC向け、高速ネットワーク環境）
-const BUFFER_SIZE = 2 * 1024 * 1024;
+// バッファサイズ（4MB - ロスレスAAC向け、高速ネットワーク環境）
+const BUFFER_SIZE = 4 * 1024 * 1024;
 
 /**
  * バイト数を人間が読みやすい形式にフォーマット
@@ -150,17 +154,74 @@ export class MusicBot {
     });
 
     this.client.on(Events.InteractionCreate, async (interaction: Interaction) => {
-      if (interaction.isChatInputCommand()) {
-        await this.handleCommand(interaction);
-      } else if (interaction.isStringSelectMenu()) {
-        await this.handleSelectMenu(interaction);
+      try {
+        if (interaction.isChatInputCommand()) {
+          await this.handleCommand(interaction);
+        } else if (interaction.isStringSelectMenu()) {
+          await this.handleSelectMenu(interaction);
+        } else if (interaction.isButton()) {
+          await this.handleButton(interaction);
+        }
+      } catch (error) {
+        logger.error('Error handling interaction:', error);
       }
     });
   }
 
   private async handleSelectMenu(interaction: StringSelectMenuInteraction) {
-    if (interaction.customId === 'playlist_select') {
-      await this.handlePlaylistSelect(interaction);
+    try {
+      if (interaction.customId === 'playlist_select') {
+        await this.handlePlaylistSelect(interaction);
+      }
+    } catch (error) {
+      logger.error('Error handling select menu:', error);
+    }
+  }
+
+  /**
+   * ボタンインタラクションのハンドラー
+   */
+  private async handleButton(interaction: ButtonInteraction) {
+    const guildId = interaction.guildId;
+    if (!guildId) return;
+
+    const player = this.players.get(guildId);
+
+    try {
+      // インタラクションを確認（メッセージは送信しない）
+      await interaction.deferUpdate();
+
+      switch (interaction.customId) {
+        case 'music_pause': {
+          if (player && player.state.status === AudioPlayerStatus.Playing) {
+            player.pause();
+          }
+          break;
+        }
+        case 'music_resume': {
+          if (player && player.state.status === AudioPlayerStatus.Paused) {
+            player.unpause();
+          }
+          break;
+        }
+        case 'music_skip': {
+          if (player) {
+            player.stop();
+          }
+          break;
+        }
+        case 'music_stop': {
+          if (player) {
+            player.stop();
+            this.currentPlaylists.delete(guildId);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    } catch (error) {
+      logger.error('Error handling button interaction:', error);
     }
   }
 
@@ -440,13 +501,20 @@ export class MusicBot {
         components: [],
       });
 
-      await this.playNextSong(guildId);
+      // インタラクション応答後に非同期で再生開始（awaitしない）
+      this.playNextSong(guildId).catch(error => {
+        logger.error('Error starting playback:', error);
+      });
     } catch (error) {
       logger.error('Error starting playback:', error);
-      await interaction.followUp({
-        content: '再生の開始に失敗しました。',
-        flags: MessageFlags.Ephemeral,
-      });
+      try {
+        await interaction.followUp({
+          content: '再生の開始に失敗しました。',
+          flags: MessageFlags.Ephemeral,
+        });
+      } catch {
+        // インタラクションが無効な場合は無視
+      }
     }
   }
 
@@ -537,12 +605,47 @@ export class MusicBot {
           });
         }
 
-        // アルバムアートを設定
+        // アルバムアートを取得して添付
+        let attachment: AttachmentBuilder | null = null;
         if (song.imageUrl) {
-          embed.setThumbnail(song.imageUrl);
+          try {
+            const imageResponse = await fetch(song.imageUrl);
+            if (imageResponse.ok) {
+              const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+              attachment = new AttachmentBuilder(imageBuffer, { name: 'album.jpg' });
+              embed.setThumbnail('attachment://album.jpg');
+            }
+          } catch (error) {
+            logger.warn('Failed to fetch album art:', error);
+          }
         }
 
-        await textChannel.send({ embeds: [embed] });
+        // コントロールボタンを作成
+        const controlRow = new ActionRowBuilder<ButtonBuilder>()
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId('music_pause')
+              .setStyle(ButtonStyle.Secondary)
+              .setEmoji('⏸'),
+            new ButtonBuilder()
+              .setCustomId('music_resume')
+              .setStyle(ButtonStyle.Secondary)
+              .setEmoji('▶'),
+            new ButtonBuilder()
+              .setCustomId('music_skip')
+              .setStyle(ButtonStyle.Secondary)
+              .setEmoji('⏭'),
+            new ButtonBuilder()
+              .setCustomId('music_stop')
+              .setStyle(ButtonStyle.Secondary)
+              .setEmoji('⏹'),
+          );
+
+        await textChannel.send({
+          embeds: [embed],
+          components: [controlRow],
+          files: attachment ? [attachment] : [],
+        });
       }
 
       // ストリームをバッファリングしてから再生開始
@@ -595,6 +698,9 @@ export class MusicBot {
           setTimeout(() => this.playNextSong(guildId), 1000);
         });
       }
+
+      // FFmpegがフレームを準備する時間を確保
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       player.play(resource);
     } catch (error) {
@@ -691,11 +797,24 @@ export class MusicBot {
       });
     }
 
-    // アルバムアートを設定
+    // アルバムアートを取得して添付
+    let attachment: AttachmentBuilder | null = null;
     if (song.imageUrl) {
-      embed.setThumbnail(song.imageUrl);
+      try {
+        const imageResponse = await fetch(song.imageUrl);
+        if (imageResponse.ok) {
+          const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+          attachment = new AttachmentBuilder(imageBuffer, { name: 'album.jpg' });
+          embed.setThumbnail('attachment://album.jpg');
+        }
+      } catch (error) {
+        logger.warn('Failed to fetch album art:', error);
+      }
     }
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.reply({
+      embeds: [embed],
+      files: attachment ? [attachment] : [],
+    });
   }
 }
