@@ -4,7 +4,7 @@
     {
       "label": "Docker Buildx Build",
       "type": "shell",
-      "command": "docker buildx build --platform=linux/amd64,linux/arm64 -t tkgling/jellyfin-discord-bot:latest . --push",
+      "command": "bash .vscode/scripts/deploy-docker.sh",
       "group": "build",
       "problemMatcher": []
     }
