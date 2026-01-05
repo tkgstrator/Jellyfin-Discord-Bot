@@ -116,9 +116,10 @@ export class PlayerService {
       // ストリームをバッファリングしてから再生開始
       const bufferedStream = await createBufferedStream(song.streamUrl)
 
-      // createAudioResourceに直接ストリームを渡す（内部でFFmpegが処理）
+      // Jellyfinから常にWebM/Opus形式で配信されるため、WebMOpusを使用
+      // これによりFFmpegによる再エンコードを回避し、低レイテンシで再生可能
       const resource = createAudioResource(bufferedStream, {
-        inputType: StreamType.Arbitrary,
+        inputType: StreamType.WebmOpus,
         inlineVolume: true
       })
 
